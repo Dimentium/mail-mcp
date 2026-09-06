@@ -1,10 +1,64 @@
 package mailbox
 
 import (
+	"errors"
 	"testing"
 
 	imap "github.com/emersion/go-imap/v2"
 )
+
+func TestListMailboxEntriesFallsBackWithoutSpecialUse(t *testing.T) {
+	want := []*imap.ListData{{Mailbox: "INBOX"}}
+	calls := 0
+	got, err := listMailboxEntries(func(options *imap.ListOptions) ([]*imap.ListData, error) {
+		calls++
+		switch calls {
+		case 1:
+			if options == nil || !options.ReturnSpecialUse {
+				t.Fatal("first LIST request did not ask for SPECIAL-USE")
+			}
+			return nil, errors.New("unsupported LIST-EXTENDED option")
+		case 2:
+			if options != nil {
+				t.Fatal("fallback LIST request should not include extensions")
+			}
+			return want, nil
+		default:
+			t.Fatal("unexpected additional LIST request")
+			return nil, nil
+		}
+	})
+	if err != nil {
+		t.Fatalf("listMailboxEntries returned error: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("LIST calls = %d, want 2", calls)
+	}
+	if len(got) != 1 || got[0].Mailbox != "INBOX" {
+		t.Fatalf("entries = %#v, want %#v", got, want)
+	}
+}
+
+func TestListMailboxEntriesKeepsSpecialUseResult(t *testing.T) {
+	want := []*imap.ListData{{Mailbox: "Sent", Attrs: []imap.MailboxAttr{imap.MailboxAttrSent}}}
+	calls := 0
+	got, err := listMailboxEntries(func(options *imap.ListOptions) ([]*imap.ListData, error) {
+		calls++
+		if options == nil || !options.ReturnSpecialUse {
+			t.Fatal("LIST request did not ask for SPECIAL-USE")
+		}
+		return want, nil
+	})
+	if err != nil {
+		t.Fatalf("listMailboxEntries returned error: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("LIST calls = %d, want 1", calls)
+	}
+	if len(got) != 1 || got[0].Mailbox != "Sent" || got[0].Attrs[0] != imap.MailboxAttrSent {
+		t.Fatalf("entries = %#v, want %#v", got, want)
+	}
+}
 
 func TestRoleForUsesSpecialUseAttributes(t *testing.T) {
 	cases := []struct {

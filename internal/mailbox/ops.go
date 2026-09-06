@@ -85,10 +85,9 @@ func (s *Session) SelectFor(id msgid.ID, readOnly bool) error {
 
 // ListMailboxes returns every folder visible to the account.
 func (s *Session) ListMailboxes() ([]Folder, error) {
-	entries, err := s.conn.client.List("", "*", &imap.ListOptions{ReturnSpecialUse: true}).Collect()
-	if err != nil {
-		entries, err = s.conn.client.List("", "*", nil).Collect()
-	}
+	entries, err := listMailboxEntries(func(options *imap.ListOptions) ([]*imap.ListData, error) {
+		return s.conn.client.List("", "*", options).Collect()
+	})
 	if err != nil {
 		return nil, fmt.Errorf("list folders: %w", err)
 	}
@@ -110,6 +109,17 @@ func (s *Session) ListMailboxes() ([]Folder, error) {
 		})
 	}
 	return out, nil
+}
+
+// listMailboxEntries asks for SPECIAL-USE first so clients receive the
+// server's declared folder roles. Some IMAP servers reject that extension;
+// retrying the base LIST command keeps folder discovery available for them.
+func listMailboxEntries(list func(*imap.ListOptions) ([]*imap.ListData, error)) ([]*imap.ListData, error) {
+	entries, err := list(&imap.ListOptions{ReturnSpecialUse: true})
+	if err == nil {
+		return entries, nil
+	}
+	return list(nil)
 }
 
 // roleFor normalizes a folder's purpose, preferring the server's SPECIAL-USE
