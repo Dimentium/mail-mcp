@@ -127,6 +127,11 @@ type Config struct {
 	// IdleConnTTL is how long a pooled IMAP connection may sit unused
 	// before it is closed.
 	IdleConnTTL time.Duration `yaml:"-"`
+
+	// ManagedDraftKey is a 32-byte base64url secret supplied only by MacMCP's
+	// private runtime configuration. It authenticates drafts that its local
+	// action profile is allowed to update.
+	ManagedDraftKey string `yaml:"managed_draft_key"`
 }
 
 // Default values applied when the config omits them.

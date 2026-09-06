@@ -39,6 +39,7 @@ func (s *Server) Register(srv *mcp.Server) {
 	s.registerAccounts(srv)
 	s.registerRead(srv)
 	s.registerSend(srv)
+	s.registerManagedDrafts(srv)
 	s.registerManage(srv)
 	s.registerFolders(srv)
 }

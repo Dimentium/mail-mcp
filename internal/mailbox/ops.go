@@ -1,6 +1,7 @@
 package mailbox
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"strings"
@@ -12,6 +13,14 @@ import (
 	"github.com/kacperkwapisz/mail-mcp/internal/config"
 	"github.com/kacperkwapisz/mail-mcp/internal/msgid"
 )
+
+// AppendResult identifies a message created by APPEND when the server
+// supports UIDPLUS (or IMAP4rev2). A zero UID means the server did not report
+// the assigned handle.
+type AppendResult struct {
+	UID         imap.UID
+	UIDValidity uint32
+}
 
 // Session is a handle to an authenticated IMAP connection, valid only for
 // the duration of a Pool.Do callback.
@@ -448,29 +457,45 @@ func (s *Session) Move(uid imap.UID, dest string) (imap.UID, error) {
 
 // Append writes a raw message into a folder, creating the folder if needed.
 func (s *Session) Append(mailbox string, raw []byte, flags []imap.Flag) error {
+	_, err := s.AppendWithResult(mailbox, raw, flags)
+	return err
+}
+
+// AppendWithResult writes a raw message and returns its assigned IMAP handle
+// when the server advertises it. Callers that need to modify the new message
+// must fail closed when UIDPLUS is unavailable instead of guessing by search.
+func (s *Session) AppendWithResult(mailbox string, raw []byte, flags []imap.Flag) (AppendResult, error) {
 	if err := s.EnsureMailbox(mailbox); err != nil {
-		return err
+		return AppendResult{}, err
 	}
 	cmd := s.conn.client.Append(mailbox, int64(len(raw)), &imap.AppendOptions{
 		Flags: flags,
 		Time:  time.Now(),
 	})
-	if _, err := io.Copy(cmd, strings.NewReader(string(raw))); err != nil {
+	if _, err := io.Copy(cmd, bytes.NewReader(raw)); err != nil {
 		_ = cmd.Close()
-		return fmt.Errorf("write message to %q: %w", mailbox, err)
+		return AppendResult{}, fmt.Errorf("write message to %q: %w", mailbox, err)
 	}
 	if err := cmd.Close(); err != nil {
-		return fmt.Errorf("append to %q: %w", mailbox, err)
+		return AppendResult{}, fmt.Errorf("append to %q: %w", mailbox, err)
 	}
-	if _, err := cmd.Wait(); err != nil {
-		return fmt.Errorf("append to %q: %w", mailbox, err)
+	data, err := cmd.Wait()
+	if err != nil {
+		return AppendResult{}, fmt.Errorf("append to %q: %w", mailbox, err)
 	}
 	// The append invalidated our cached view of the selected mailbox.
 	if s.conn.selected == mailbox {
 		s.conn.selected = ""
 		s.conn.selectedUIDValidity = 0
 	}
-	return nil
+	return AppendResult{UID: data.UID, UIDValidity: data.UIDValidity}, nil
+}
+
+// RetireDraft hides an older draft after its replacement has been appended.
+// It deliberately does not EXPUNGE: servers and mail clients retain their own
+// recovery semantics, while the replacement already exists durably.
+func (s *Session) RetireDraft(uid imap.UID) error {
+	return s.StoreFlags(uid, []imap.Flag{imap.FlagDeleted}, true)
 }
 
 // EnsureMailbox creates a folder when it does not already exist.

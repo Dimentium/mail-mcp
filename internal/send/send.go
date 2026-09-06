@@ -44,10 +44,16 @@ type Composition struct {
 	Subject  string
 	BodyText string
 	BodyHTML string
+	// AllowEmptyRecipients is used only for locally managed drafts. Sending
+	// still requires a normal recipient list.
+	AllowEmptyRecipients bool
 
 	ReplyTo    string
 	InReplyTo  string
 	References []string
+	// Headers are server-controlled extension headers. They are validated
+	// before serialization so a caller cannot turn one header into another.
+	Headers map[string]string
 
 	Attachments []Attachment
 }
@@ -176,6 +182,9 @@ func Build(acc *config.Account, comp *Composition) (*gomail.Msg, error) {
 			msg.SetGenHeader(gomail.HeaderReferences, strings.Join(refs, " "))
 		}
 	}
+	for name, value := range comp.Headers {
+		msg.SetHeader(gomail.Header(name), value)
+	}
 
 	text := sanitizeBody(comp.BodyText)
 	html := sanitizeBody(comp.BodyHTML)
@@ -215,7 +224,11 @@ const htmlFallbackNotice = "This message is formatted in HTML. Please view it in
 
 // Validate rejects malformed compositions before any socket is opened.
 func Validate(comp *Composition) error {
-	if err := ValidateRecipients(comp.To, "to"); err != nil {
+	if len(comp.To) == 0 {
+		if !comp.AllowEmptyRecipients {
+			return fmt.Errorf("to needs at least one recipient")
+		}
+	} else if err := ValidateRecipients(comp.To, "to"); err != nil {
 		return err
 	}
 	if len(comp.Cc) > 0 {
@@ -255,6 +268,14 @@ func Validate(comp *Composition) error {
 	}
 	if err := ValidateNoWrapperLeak("subject", comp.Subject); err != nil {
 		return err
+	}
+	for name, value := range comp.Headers {
+		if name == "" || strings.ContainsAny(name, ":\r\n") {
+			return fmt.Errorf("invalid custom header name %q", name)
+		}
+		if strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("custom header %q contains a line break", name)
+		}
 	}
 	return nil
 }

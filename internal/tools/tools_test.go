@@ -94,6 +94,7 @@ func TestAllToolsRegister(t *testing.T) {
 		"list_accounts", "verify_account", "get_server_info",
 		"search_emails", "read_email", "get_attachment",
 		"send_email", "reply_email", "forward_email", "create_draft",
+		"create_managed_draft", "update_managed_draft",
 		"archive_email", "move_email", "mark_email", "delete_email",
 		"list_folders", "create_folder", "rename_folder", "delete_folder",
 	}
@@ -185,16 +186,18 @@ func TestRequiredFields(t *testing.T) {
 	session := connect(t, loadTestConfig(t))
 
 	cases := map[string][]string{
-		"search_emails": {"account_id"},
-		"read_email":    {"message_id"},
-		"send_email":    {"account_id", "to", "subject"},
-		"reply_email":   {"message_id"},
-		"forward_email": {"message_id", "to"},
-		"move_email":    {"message_id", "to_folder"},
-		"mark_email":    {"message_id", "action"},
-		"delete_email":  {"message_id", "confirm"},
-		"delete_folder": {"account_id", "name", "confirm"},
-		"create_folder": {"account_id", "name"},
+		"search_emails":        {"account_id"},
+		"read_email":           {"message_id"},
+		"send_email":           {"account_id", "to", "subject"},
+		"reply_email":          {"message_id"},
+		"forward_email":        {"message_id", "to"},
+		"move_email":           {"message_id", "to_folder"},
+		"mark_email":           {"message_id", "action"},
+		"delete_email":         {"message_id", "confirm"},
+		"delete_folder":        {"account_id", "name", "confirm"},
+		"create_folder":        {"account_id", "name"},
+		"create_managed_draft": {"account_id", "subject"},
+		"update_managed_draft": {"message_id", "revision", "subject"},
 	}
 	for tool, want := range cases {
 		required := requiredFields(schemaFor(t, session, tool))
