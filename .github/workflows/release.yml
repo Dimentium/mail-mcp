@@ -108,5 +108,10 @@ jobs:
       - name: Verify the published image runs
         run: |
           image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
-          docker pull "$image"
-          docker run --rm "$image" --version
+          for attempt in 1 2 3 4 5; do
+            if docker pull "$image" && docker run --rm "$image" --version; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
