@@ -87,6 +87,9 @@ func (s *Session) SelectFor(id msgid.ID, readOnly bool) error {
 func (s *Session) ListMailboxes() ([]Folder, error) {
 	entries, err := s.conn.client.List("", "*", &imap.ListOptions{ReturnSpecialUse: true}).Collect()
 	if err != nil {
+		entries, err = s.conn.client.List("", "*", nil).Collect()
+	}
+	if err != nil {
 		return nil, fmt.Errorf("list folders: %w", err)
 	}
 	out := make([]Folder, 0, len(entries))
