@@ -103,15 +103,16 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Pull the artifact that was just published and run it, so a broken
-      # image is caught here rather than by whoever pulls it next.
-      - name: Verify the published image runs
+      # Load and execute the Linux image after the multi-architecture publish.
+      # GHCR packages can remain private or briefly unavailable to pull even
+      # for the publishing workflow, which is not a signal about the image.
+      - name: Verify the Linux image runs
         run: |
-          image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
-          for attempt in 1 2 3 4 5; do
-            if docker pull "$image" && docker run --rm "$image" --version; then
-              exit 0
-            fi
-            sleep 10
-          done
-          exit 1
+          image="mail-mcp-ci:${GITHUB_SHA}"
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            --build-arg "VERSION=${GITHUB_REF_NAME}" \
+            --tag "$image" \
+            .
+          docker run --rm "$image" --version

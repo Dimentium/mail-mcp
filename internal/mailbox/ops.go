@@ -461,6 +461,13 @@ func (s *Session) Append(mailbox string, raw []byte, flags []imap.Flag) error {
 	return err
 }
 
+// SupportsStableAppendHandle reports whether APPEND can return the UID and
+// UIDVALIDITY required to safely address the newly written message. IMAP4rev2
+// includes UIDPLUS through CapSet.Has.
+func (s *Session) SupportsStableAppendHandle() bool {
+	return s.conn.client.Caps().Has(imap.CapUIDPlus)
+}
+
 // AppendWithResult writes a raw message and returns its assigned IMAP handle
 // when the server advertises it. Callers that need to modify the new message
 // must fail closed when UIDPLUS is unavailable instead of guessing by search.

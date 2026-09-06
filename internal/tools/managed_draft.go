@@ -155,6 +155,9 @@ func (s *Server) saveManagedDraft(
 			return err
 		}
 		out.Folder = firstNonEmpty(folder, "Drafts")
+		if !sess.SupportsStableAppendHandle() {
+			return fmt.Errorf("managed drafts require IMAP UIDPLUS so a saved draft has a stable handle")
+		}
 		appended, err := sess.AppendWithResult(out.Folder, raw, []imap.Flag{imap.FlagDraft, imap.FlagSeen})
 		if err != nil {
 			return err
