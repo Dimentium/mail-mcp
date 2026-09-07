@@ -309,8 +309,18 @@ func hasRecipientHeaders(header stdmail.Header) bool {
 }
 
 func managedDraftRevision(raw []byte) string {
-	digest := sha256.Sum256(withoutManagedDraftRevisionHeader(raw))
+	digest := sha256.Sum256(normalizeManagedDraftRaw(withoutManagedDraftRevisionHeader(raw)))
 	return hex.EncodeToString(digest[:])
+}
+
+func normalizeManagedDraftRaw(raw []byte) []byte {
+	if bytes.HasSuffix(raw, []byte("\r\n")) {
+		return raw[:len(raw)-2]
+	}
+	if bytes.HasSuffix(raw, []byte("\n")) {
+		return raw[:len(raw)-1]
+	}
+	return raw
 }
 
 func managedDraftStoredRevision(raw []byte) (string, bool) {

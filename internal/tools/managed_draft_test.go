@@ -47,6 +47,9 @@ func TestManagedDraftRevisionChangesOnHumanEdit(t *testing.T) {
 	if managedDraftRevision(raw) == managedDraftRevision([]byte(strings.Replace(string(raw), "Body", "Human edit", 1))) {
 		t.Fatal("revision did not change after draft content changed")
 	}
+	if managedDraftRevision(raw) != managedDraftRevision(append(append([]byte{}, raw...), '\r', '\n')) {
+		t.Fatal("provider-added terminal line ending changed the revision")
+	}
 }
 
 func TestManagedDraftReadInfoReturnsSavedRevisionAndRejectsLegacyDrafts(t *testing.T) {
