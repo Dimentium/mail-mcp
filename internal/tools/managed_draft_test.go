@@ -48,3 +48,36 @@ func TestManagedDraftRevisionChangesOnHumanEdit(t *testing.T) {
 		t.Fatal("revision did not change after draft content changed")
 	}
 }
+
+func TestManagedDraftReadInfoReturnsSavedRevisionAndRejectsLegacyDrafts(t *testing.T) {
+	key := bytes.Repeat([]byte{0x51}, 32)
+	marker, err := newManagedDraftMarker(key)
+	if err != nil {
+		t.Fatalf("newManagedDraftMarker: %v", err)
+	}
+	raw, err := buildManagedDraft(&config.Account{FromAddress: "me@example.com"}, "Subject", "Body", "", marker)
+	if err != nil {
+		t.Fatalf("buildManagedDraft: %v", err)
+	}
+	info := managedDraftReadInfo(raw, key)
+	if info == nil || info.Revision != managedDraftRevision(raw) {
+		t.Fatalf("managedDraftReadInfo = %#v, want the saved revision", info)
+	}
+
+	humanEdit := []byte(strings.Replace(string(raw), "Body", "Human edit", 1))
+	humanInfo := managedDraftReadInfo(humanEdit, key)
+	if humanInfo == nil || humanInfo.Revision != info.Revision {
+		t.Fatalf("human edit changed the saved revision token: %#v", humanInfo)
+	}
+	if managedDraftRevision(humanEdit) == info.Revision {
+		t.Fatal("human edit did not invalidate the saved revision")
+	}
+
+	legacy, err := buildManagedDraftRaw(&config.Account{FromAddress: "me@example.com"}, "Subject", "Body", "", marker, "")
+	if err != nil {
+		t.Fatalf("buildManagedDraftRaw: %v", err)
+	}
+	if info := managedDraftReadInfo(legacy, key); info != nil {
+		t.Fatalf("legacy managed draft unexpectedly exposed revision: %#v", info)
+	}
+}

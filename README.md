@@ -139,6 +139,8 @@ For a client on the same machine, stdio skips the network entirely and needs no 
 
 **Attachment bytes never enter the response.** `read_email` returns attachment metadata with a `part_id`; `get_attachment` writes the file to disk and returns `file_path` (on the server) plus, when `public_url` is set, a 15-minute signed `download_url`. A remote agent curls that URL onto its own machine. A 7 MB PDF base64-encoded into a tool result would blow the context window without accomplishing anything.
 
+**Managed drafts expose a stable saved revision.** `create_managed_draft` and `update_managed_draft` return a revision token, and `read_email` returns it again for a valid managed draft. The server also hashes the current MIME bytes, so a draft edited outside MCP is rejected instead of overwritten. Drafts created before revision metadata was introduced remain readable but cannot be updated through this protected API.
+
 **Bodies are truncated and HTML is opt-in.** Message HTML is attacker-controlled and enormous. It is sanitized through bluemonday before it is ever returned, and omitted entirely unless `include_html` is set. Messages with no plain-text part get one derived from the HTML, with paragraph breaks preserved.
 
 **One pooled IMAP connection per account.** A TLS handshake plus LOGIN on every tool call is the single biggest source of latency in servers of this kind. Connections are kept authenticated, health-checked with NOOP after idling, and reconnected transparently. Operations on one account are serialized, since IMAP's selected-mailbox state makes ordering matter; different accounts run concurrently.

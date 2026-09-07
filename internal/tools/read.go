@@ -54,11 +54,12 @@ type readInput struct {
 }
 
 type readOutput struct {
-	Summary   string            `json:"summary" jsonschema:"one-line description of the result"`
-	MessageID string            `json:"message_id" jsonschema:"handle for this message, unchanged"`
-	Mailbox   string            `json:"mailbox" jsonschema:"folder the message lives in"`
-	AccountID string            `json:"account_id" jsonschema:"account the message belongs to"`
-	Message   *mailmime.Message `json:"message" jsonschema:"the parsed message"`
+	Summary      string                  `json:"summary" jsonschema:"one-line description of the result"`
+	MessageID    string                  `json:"message_id" jsonschema:"handle for this message, unchanged"`
+	Mailbox      string                  `json:"mailbox" jsonschema:"folder the message lives in"`
+	AccountID    string                  `json:"account_id" jsonschema:"account the message belongs to"`
+	ManagedDraft *managedDraftReadOutput `json:"managed_draft,omitempty" jsonschema:"present only for an authenticated managed draft; use its revision unchanged for update_managed_draft"`
+	Message      *mailmime.Message       `json:"message" jsonschema:"the parsed message"`
 }
 
 type getAttachmentInput struct {
@@ -93,7 +94,8 @@ func (s *Server) registerRead(srv *mcp.Server) {
 		Name:  "read_email",
 		Title: "Read a message",
 		Description: "Return one message's headers, body, and attachment metadata. Bodies are truncated to the server's limit and " +
-			"HTML is omitted unless requested. Attachment bytes are never included — use get_attachment for those.",
+			"HTML is omitted unless requested. Authenticated managed drafts also return their saved revision token. " +
+			"Attachment bytes are never included — use get_attachment for those.",
 		Annotations: readOnlyTool(),
 	}, s.readEmail)
 
@@ -191,6 +193,8 @@ func (s *Server) readEmail(ctx context.Context, _ *mcp.CallToolRequest, in readI
 	}
 
 	var parsed *mailmime.Message
+	var managedDraft *managedDraftReadOutput
+	managedDraftKey, _ := s.managedDraftKey()
 	err = s.withSession(ctx, acc, func(sess *mailbox.Session) error {
 		// Marking as read is a write, so the mailbox must not be read-only.
 		if err := sess.SelectFor(id, !in.MarkAsRead); err != nil {
@@ -199,6 +203,9 @@ func (s *Server) readEmail(ctx context.Context, _ *mcp.CallToolRequest, in readI
 		raw, err := sess.FetchRaw(imap.UID(id.UID), !in.MarkAsRead)
 		if err != nil {
 			return err
+		}
+		if len(managedDraftKey) > 0 {
+			managedDraft = managedDraftReadInfo(raw, managedDraftKey)
 		}
 		parsed, err = mailmime.Parse(raw, mailmime.ParseOptions{
 			MaxBodyChars:   maxChars,
@@ -220,11 +227,12 @@ func (s *Server) readEmail(ctx context.Context, _ *mcp.CallToolRequest, in readI
 	}
 
 	return nil, readOutput{
-		Summary:   summary,
-		MessageID: in.MessageID,
-		Mailbox:   id.Mailbox,
-		AccountID: acc.ID,
-		Message:   parsed,
+		Summary:      summary,
+		MessageID:    in.MessageID,
+		Mailbox:      id.Mailbox,
+		AccountID:    acc.ID,
+		ManagedDraft: managedDraft,
+		Message:      parsed,
 	}, nil
 }
 

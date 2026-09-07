@@ -22,6 +22,7 @@ import (
 )
 
 const managedDraftHeader = "X-MacMCP-Managed-Draft"
+const managedDraftRevisionHeader = "X-MacMCP-Managed-Revision"
 
 // managedDraftInput intentionally has no recipient, reply, threading, or
 // attachment fields. A managed draft can be reviewed and addressed only in a
@@ -39,6 +40,10 @@ type managedDraftUpdateInput struct {
 	Subject  string `json:"subject" jsonschema:"replacement draft subject line, single line, no line breaks"`
 	BodyText string `json:"body_text,omitempty" jsonschema:"replacement plain text draft body; use separately from body_html"`
 	BodyHTML string `json:"body_html,omitempty" jsonschema:"replacement HTML draft body using real HTML tags; use separately from body_text"`
+}
+
+type managedDraftReadOutput struct {
+	Revision string `json:"revision" jsonschema:"saved revision required by update_managed_draft; unchanged until the draft is updated through this server"`
 }
 
 type managedDraftOutput struct {
@@ -115,6 +120,10 @@ func (s *Server) updateManagedDraft(ctx context.Context, _ *mcp.CallToolRequest,
 		raw, err := sess.FetchRaw(imap.UID(id.UID), true)
 		if err != nil {
 			return err
+		}
+		storedRevision, hasStoredRevision := managedDraftStoredRevision(raw)
+		if !hasStoredRevision || !hmac.Equal([]byte(in.Revision), []byte(storedRevision)) {
+			return fmt.Errorf("managed draft revision metadata is missing or stale; do not overwrite a human edit")
 		}
 		if !hmac.Equal([]byte(in.Revision), []byte(managedDraftRevision(raw))) {
 			return fmt.Errorf("managed draft revision is stale; do not overwrite a human edit")
@@ -200,12 +209,24 @@ func (s *Server) saveManagedDraft(
 }
 
 func buildManagedDraft(acc *config.Account, subject, bodyText, bodyHTML, marker string) ([]byte, error) {
+	raw, err := buildManagedDraftRaw(acc, subject, bodyText, bodyHTML, marker, "")
+	if err != nil {
+		return nil, err
+	}
+	return withManagedDraftRevisionHeader(raw, managedDraftRevision(raw))
+}
+
+func buildManagedDraftRaw(acc *config.Account, subject, bodyText, bodyHTML, marker, revision string) ([]byte, error) {
+	headers := map[string]string{managedDraftHeader: marker}
+	if revision != "" {
+		headers[managedDraftRevisionHeader] = revision
+	}
 	msg, err := send.Build(acc, &send.Composition{
 		Subject:              subject,
 		BodyText:             bodyText,
 		BodyHTML:             bodyHTML,
 		AllowEmptyRecipients: true,
-		Headers:              map[string]string{managedDraftHeader: marker},
+		Headers:              headers,
 	})
 	if err != nil {
 		return nil, err
@@ -265,6 +286,17 @@ func validManagedDraftMarker(raw, key []byte) (string, bool, error) {
 	return marker, true, nil
 }
 
+func managedDraftReadInfo(raw, key []byte) *managedDraftReadOutput {
+	if _, valid, err := validManagedDraftMarker(raw, key); err != nil || !valid {
+		return nil
+	}
+	revision, valid := managedDraftStoredRevision(raw)
+	if !valid {
+		return nil
+	}
+	return &managedDraftReadOutput{Revision: revision}
+}
+
 func hasRecipientHeaders(header stdmail.Header) bool {
 	for _, name := range []string{
 		"To", "Cc", "Bcc", "Reply-To", "Resent-To", "Resent-Cc", "Resent-Bcc", "Resent-Reply-To",
@@ -277,6 +309,84 @@ func hasRecipientHeaders(header stdmail.Header) bool {
 }
 
 func managedDraftRevision(raw []byte) string {
-	digest := sha256.Sum256(raw)
+	digest := sha256.Sum256(withoutManagedDraftRevisionHeader(raw))
 	return hex.EncodeToString(digest[:])
+}
+
+func managedDraftStoredRevision(raw []byte) (string, bool) {
+	message, err := stdmail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		return "", false
+	}
+	revision := strings.TrimSpace(message.Header.Get(managedDraftRevisionHeader))
+	if len(revision) != sha256.Size*2 {
+		return "", false
+	}
+	if _, err := hex.DecodeString(revision); err != nil {
+		return "", false
+	}
+	return revision, true
+}
+
+func withManagedDraftRevisionHeader(raw []byte, revision string) ([]byte, error) {
+	separator := []byte("\r\n\r\n")
+	lineEnding := "\r\n"
+	boundary := bytes.Index(raw, separator)
+	if boundary < 0 {
+		separator = []byte("\n\n")
+		lineEnding = "\n"
+		boundary = bytes.Index(raw, separator)
+	}
+	if boundary < 0 {
+		return nil, fmt.Errorf("managed draft has no header/body separator")
+	}
+
+	line := []byte(lineEnding + managedDraftRevisionHeader + ": " + revision)
+	out := make([]byte, 0, len(raw)+len(line))
+	out = append(out, raw[:boundary]...)
+	out = append(out, line...)
+	out = append(out, raw[boundary:]...)
+	return out, nil
+}
+
+func withoutManagedDraftRevisionHeader(raw []byte) []byte {
+	separator := []byte("\r\n\r\n")
+	lineEnding := "\r\n"
+	separatorLength := len(separator)
+	boundary := bytes.Index(raw, separator)
+	if boundary < 0 {
+		separator = []byte("\n\n")
+		lineEnding = "\n"
+		separatorLength = len(separator)
+		boundary = bytes.Index(raw, separator)
+	}
+	if boundary < 0 {
+		return raw
+	}
+
+	var header bytes.Buffer
+	skipContinuation := false
+	removedRevision := false
+	for _, line := range bytes.SplitAfter(raw[:boundary], []byte(lineEnding)) {
+		lineText := strings.TrimSuffix(string(line), lineEnding)
+		if skipContinuation && (strings.HasPrefix(lineText, " ") || strings.HasPrefix(lineText, "\t")) {
+			continue
+		}
+		skipContinuation = false
+		if strings.HasPrefix(strings.ToLower(lineText), strings.ToLower(managedDraftRevisionHeader)+":") {
+			skipContinuation = true
+			removedRevision = true
+			continue
+		}
+		header.Write(line)
+	}
+	headerBytes := header.Bytes()
+	if removedRevision && bytes.HasSuffix(headerBytes, []byte(lineEnding)) {
+		headerBytes = headerBytes[:len(headerBytes)-len(lineEnding)]
+	}
+	var result bytes.Buffer
+	result.Write(headerBytes)
+	result.Write(separator)
+	result.Write(raw[boundary+separatorLength:])
+	return result.Bytes()
 }
