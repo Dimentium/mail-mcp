@@ -43,7 +43,7 @@ type managedDraftUpdateInput struct {
 }
 
 type managedDraftReadOutput struct {
-	Revision string `json:"revision" jsonschema:"saved revision required by update_managed_draft; unchanged until the draft is updated through this server"`
+	Revision string `json:"revision" jsonschema:"revision required by update_managed_draft; legacy managed drafts derive it from their current MIME until their first update"`
 }
 
 type managedDraftOutput struct {
@@ -122,10 +122,14 @@ func (s *Server) updateManagedDraft(ctx context.Context, _ *mcp.CallToolRequest,
 			return err
 		}
 		storedRevision, hasStoredRevision := managedDraftStoredRevision(raw)
-		if !hasStoredRevision || !hmac.Equal([]byte(in.Revision), []byte(storedRevision)) {
-			return fmt.Errorf("managed draft revision metadata is missing or stale; do not overwrite a human edit")
+		expectedRevision := managedDraftRevision(raw)
+		if hasStoredRevision {
+			expectedRevision = storedRevision
+		} else if managedDraftHasRevisionHeader(raw) {
+			return fmt.Errorf("managed draft revision metadata is invalid; do not overwrite a human edit")
 		}
-		if !hmac.Equal([]byte(in.Revision), []byte(managedDraftRevision(raw))) {
+		if !hmac.Equal([]byte(in.Revision), []byte(expectedRevision)) ||
+			!hmac.Equal([]byte(in.Revision), []byte(managedDraftRevision(raw))) {
 			return fmt.Errorf("managed draft revision is stale; do not overwrite a human edit")
 		}
 		var valid bool
@@ -291,8 +295,11 @@ func managedDraftReadInfo(raw, key []byte) *managedDraftReadOutput {
 		return nil
 	}
 	revision, valid := managedDraftStoredRevision(raw)
-	if !valid {
+	if !valid && managedDraftHasRevisionHeader(raw) {
 		return nil
+	}
+	if !valid {
+		revision = managedDraftRevision(raw)
 	}
 	return &managedDraftReadOutput{Revision: revision}
 }
@@ -336,6 +343,14 @@ func managedDraftStoredRevision(raw []byte) (string, bool) {
 		return "", false
 	}
 	return revision, true
+}
+
+func managedDraftHasRevisionHeader(raw []byte) bool {
+	message, err := stdmail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(message.Header.Get(managedDraftRevisionHeader)) != ""
 }
 
 func withManagedDraftRevisionHeader(raw []byte, revision string) ([]byte, error) {

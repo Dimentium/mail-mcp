@@ -52,7 +52,7 @@ func TestManagedDraftRevisionChangesOnHumanEdit(t *testing.T) {
 	}
 }
 
-func TestManagedDraftReadInfoReturnsSavedRevisionAndRejectsLegacyDrafts(t *testing.T) {
+func TestManagedDraftReadInfoReturnsSavedRevisionAndAdoptsLegacyDrafts(t *testing.T) {
 	key := bytes.Repeat([]byte{0x51}, 32)
 	marker, err := newManagedDraftMarker(key)
 	if err != nil {
@@ -80,7 +80,8 @@ func TestManagedDraftReadInfoReturnsSavedRevisionAndRejectsLegacyDrafts(t *testi
 	if err != nil {
 		t.Fatalf("buildManagedDraftRaw: %v", err)
 	}
-	if info := managedDraftReadInfo(legacy, key); info != nil {
-		t.Fatalf("legacy managed draft unexpectedly exposed revision: %#v", info)
+	legacyInfo := managedDraftReadInfo(legacy, key)
+	if legacyInfo == nil || legacyInfo.Revision != managedDraftRevision(legacy) {
+		t.Fatalf("legacy managedDraftReadInfo = %#v, want a derived revision", legacyInfo)
 	}
 }

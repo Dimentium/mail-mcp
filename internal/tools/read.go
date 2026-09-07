@@ -94,7 +94,7 @@ func (s *Server) registerRead(srv *mcp.Server) {
 		Name:  "read_email",
 		Title: "Read a message",
 		Description: "Return one message's headers, body, and attachment metadata. Bodies are truncated to the server's limit and " +
-			"HTML is omitted unless requested. Authenticated managed drafts also return their saved revision token. " +
+			"HTML is omitted unless requested. Authenticated managed drafts also return their revision token; " +
 			"Attachment bytes are never included — use get_attachment for those.",
 		Annotations: readOnlyTool(),
 	}, s.readEmail)
